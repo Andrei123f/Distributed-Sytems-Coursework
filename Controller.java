@@ -259,6 +259,18 @@ public class Controller
         }
     }
 
+    public static void main(String[] args) throws Exception
+    {
+        String cPort = args[0];
+        String rFactor = args[1];
+        String timeoutPer = args[2];
+        String timeoutForNewReb = args[3];
+        System.out.println("Starting server...");
+        Controller sysStart = new Controller(Integer.parseInt(cPort), Integer.parseInt(rFactor), Integer.parseInt(timeoutPer), Integer.parseInt(timeoutForNewReb));
+    }
+
+
+
     /**
      * The entrypoint of the program when the Controller starts
      *
@@ -269,7 +281,8 @@ public class Controller
     {
        //setup the port to listen for incoming requests from client/Dstores
        this.socket = new ServerSocket(this.cPort);
-       //wait for incoming connections
+        System.out.println("Controller Server started. Listening to requests.");
+        //wait for incoming connections
        this.waitForRequests();
     }
 
