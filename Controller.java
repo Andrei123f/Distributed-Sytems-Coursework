@@ -220,17 +220,17 @@ public class Controller
     class ONGOING_PROCESS
     {
         String processType;
-        String cPort; //cPort. the port where we will send the success response after all success responses from dStores have been received
+        PrintWriter clientOutputStream;
         List<String> dPorts; //for internal use - used for data linking.
         int numberOfSentRequests; //Number of DStores that we sent requests to
         int numberOfReceivedSuccessRequests = 0; //initially will be 0 and we will increment when we receive a success response from Dstores
         int numberOfReceivedFailureRequests = 0; //initially will be 0 and we will increment when we receive a failure response from Dstores todo currently not used at all.
 
-        public ONGOING_PROCESS(String processType, String cPort, List<String> dPorts, int numberOfSentRequests){
+        public ONGOING_PROCESS(String processType, PrintWriter clientOutputStream, List<String> dPorts, int numberOfSentRequests){
             this.processType = processType;
-            this.cPort = cPort;
             this.dPorts = dPorts;
             this.numberOfSentRequests = numberOfSentRequests;
+            this.clientOutputStream = clientOutputStream;
         }
 
     }
@@ -295,7 +295,7 @@ public class Controller
                       this.sendResponse(response, outStream);
                       break;
                   case Controller.STORE_OPERATION:
-                      response = this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"), client.getPort());
+                      response = this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"), outStream);
                       this.sendResponse(response, outStream);
                       break;
                   case Controller.LOAD_OPERATION:
@@ -304,7 +304,7 @@ public class Controller
                       break;
                   case Controller.REMOVE_OPERATION:
                       //no response here because this will be covered in the REMOVE_ACK CASE
-                      this.processRemoveOperation(formattedRequest.arguments.get("filename"), client.getPort());
+                      this.processRemoveOperation(formattedRequest.arguments.get("filename"), outStream);
                       break;
                   case Controller.JOIN_OPERATION:
                       this.processJoinOperation(formattedRequest.arguments.get("port"));
@@ -359,7 +359,7 @@ public class Controller
 
 
     //STORE OPERATION
-    private String processStoreOperation(String filename, String filesize, int cPort) throws Exception
+    private String processStoreOperation(String filename, String filesize, PrintWriter clientOutputStream) throws Exception
     {
         this.checkIfEnoughDstores(true);
         String port_arr = " ";
@@ -384,7 +384,7 @@ public class Controller
         }
 
         //create a new process so that we can keep track of the ongoing ones
-        ONGOING_PROCESS storeProcess = new ONGOING_PROCESS(Controller.STORE_PROCESS, Integer.toString(cPort), selectedDPorts, selectedDPorts.size());
+        ONGOING_PROCESS storeProcess = new ONGOING_PROCESS(Controller.STORE_PROCESS, clientOutputStream, selectedDPorts, selectedDPorts.size());
         this.ongoingProcesses.add(storeProcess);
 
         //port arr would look something like " por1 port2 port3 ..."
@@ -425,7 +425,7 @@ public class Controller
     }
 
     //REMOVE OPERATION
-    private void processRemoveOperation(String filename, int cPort) throws Exception
+    private void processRemoveOperation(String filename, PrintWriter clientOutputStream) throws Exception
     {
         this.checkIfEnoughDstores(false);
 
@@ -440,7 +440,7 @@ public class Controller
 
 
         //create a new process so that we can keep track of the ongoing ones
-        ONGOING_PROCESS removeProcess = new ONGOING_PROCESS(Controller.REMOVE_PROCESS, Integer.toString(cPort), dStorePorts, dStorePorts.size());
+        ONGOING_PROCESS removeProcess = new ONGOING_PROCESS(Controller.REMOVE_PROCESS, clientOutputStream, dStorePorts, dStorePorts.size());
         this.ongoingProcesses.add(removeProcess);
 
         //now for each the selected dStores send remove requests to them.
@@ -472,11 +472,8 @@ public class Controller
         //if we have received all success responses from Dstores send the success response to client
         if(linkedProcess.numberOfReceivedSuccessRequests == linkedProcess.numberOfSentRequests) {
             String response = Controller.STORE_COMPLETE_RESPONSE;
-            int cPort = Integer.parseInt(linkedProcess.cPort);
-            Socket socket = new Socket("localhost", cPort);
-            PrintWriter outPutStream = new PrintWriter(socket.getOutputStream());
-            outPutStream.println(response);
-            outPutStream.flush();
+            linkedProcess.clientOutputStream.println(response);
+            linkedProcess.clientOutputStream.flush();
             this.removeOngoingProcess(linkedProcess);
         }
 
@@ -490,11 +487,8 @@ public class Controller
         //if we have received all success responses from Dstores send the success response to client
         if(linkedProcess.numberOfReceivedSuccessRequests == linkedProcess.numberOfSentRequests) {
             String response = Controller.REMOVE_COMPLETE_RESPONSE;
-            int cPort = Integer.parseInt(linkedProcess.cPort);
-            Socket socket = new Socket("localhost", cPort);
-            PrintWriter outPutStream = new PrintWriter(socket.getOutputStream());
-            outPutStream.println(response);
-            outPutStream.flush();
+            linkedProcess.clientOutputStream.println(response);
+            linkedProcess.clientOutputStream.flush();
             this.removeOngoingProcess(linkedProcess);
         }
 
