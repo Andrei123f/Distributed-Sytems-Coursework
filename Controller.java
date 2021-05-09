@@ -29,7 +29,7 @@ public class Controller
    //expected incoming requests from DStores
    private static final String STORE_ACK_DSTORE = "STORE_ACK";
    private static final String REMOVE_ACK_DSTORE = "REMOVE_ACK";
-   private static final String JOIN_OPERATION = "JOIN";
+   public static final String JOIN_OPERATION = "JOIN";
 
    //outgoing requests
    //expected outgoing requests to client
@@ -328,9 +328,8 @@ public class Controller
                   case Controller.REMOVE_ACK_DSTORE:
                       this.processRemoveACKOperation(formattedRequest.arguments.get("filename"), client.getPort());
               }
-
           }
-          client.close();
+           client.close();
        }
 
 
@@ -471,9 +470,29 @@ public class Controller
     //JOIN OPERATION
     private void processJoinOperation(String port)
     {
+        System.out.println("adding a new DStore...");
         DSTORE_DATA dStore = new DSTORE_DATA(Integer.parseInt(port));
         this.dStores.add(dStore);
         this.currRFator++;
+        System.out.println("DStore added. Current rFactor: " + this.currRFator);
+        System.out.println("Dstores : ");
+        int  i = 1;
+        for (DSTORE_DATA eachDstore : this.dStores) {
+            System.out.println("Dstore#" +  i + " port : " + eachDstore.dPort);
+            System.out.println("Dstore#" +  i + " status : " + eachDstore.status);
+            System.out.println("Dstore#" + i + " files: ");
+
+            if(eachDstore.files.size() != 0) {
+                for (HashMap<String, String> eachFile : eachDstore.files) {
+                    System.out.println("Filename : " + eachFile.get("filename"));
+                    System.out.println("Filename : " + eachFile.get("filesize"));
+                }
+            }
+            System.out.println("No files for this bad boy");
+
+            i++;
+        }
+
     }
 
     //STORE ACK OPERATION
