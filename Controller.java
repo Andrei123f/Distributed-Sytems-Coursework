@@ -527,6 +527,7 @@ public class Controller
                 this.ongoingProcesses.remove(i);
                 break;
             }
+            i++;
         }
     }
 
