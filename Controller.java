@@ -22,15 +22,15 @@ public class Controller {
     /* Define constants start */
     //incoming requests
     //expected incoming requests from client
-    private static final String STORE_OPERATION = "STORE";
-    private static final String LOAD_OPERATION = "LOAD";
-    private static final String REMOVE_OPERATION = "REMOVE"; //this will also be used to send the request to the Dstores
-    private static final String LIST_OPERATION = "LIST";
+    private static final String STORE_OPERATION = Protocol.STORE_TOKEN;
+    private static final String LOAD_OPERATION = Protocol.LOAD_TOKEN;
+    private static final String REMOVE_OPERATION = Protocol.REMOVE_TOKEN; //this will also be used to send the request to the Dstores
+    private static final String LIST_OPERATION = Protocol.LIST_TOKEN;
 
     //expected incoming requests from DStores
-    private static final String STORE_ACK_DSTORE = "STORE_ACK";
+    private static final String STORE_ACK_DSTORE = Protocol.STORE_ACK_TOKEN;
     private static final String REMOVE_ACK_DSTORE = "REMOVE_ACK";
-    public static final String JOIN_OPERATION = "JOIN";
+    public static final String JOIN_OPERATION = Protocol.JOIN_TOKEN;
 
     //outgoing requests
     //expected outgoing requests to client
@@ -255,79 +255,83 @@ public class Controller {
                 this.inStream = new BufferedReader(new InputStreamReader(this.clientSocket.getInputStream()));
                 this.outStream = new PrintWriter(this.clientSocket.getOutputStream());
                 String operation = null;
-                String request;
+                String request = this.inStream.readLine();
 
-                while ((request = inStream.readLine()) != null) {
-                    System.out.println("Incoming request : " + request);
-                    INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
+                while (request  != null) {
+                    try {
+                        System.out.println("Incoming request : " + request);
+                        INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
 
-                    if (formattedRequest.invalidOperation || formattedRequest.invalidArguments) {
-                        throw new Exception("Invalid request: " + request);
+                        if (formattedRequest.invalidOperation || formattedRequest.invalidArguments) {
+                            throw new Exception("Invalid request: " + request);
+                        }
+
+
+                        String response;
+                        operation = formattedRequest.operation;
+                        this.request_type = operation;
+                        switch (formattedRequest.operation) {
+                            case Controller.LIST_OPERATION:
+                                Thread.currentThread().setPriority(7);
+                                response = this.processListOperation();
+                                this.sendResponse(response, outStream);
+                                break;
+                            case Controller.STORE_OPERATION:
+                                response = this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"), outStream);
+                                this.sendResponse(response, outStream);
+                                while (!this.finishedOngoingRequest) {
+                                    //check if we have finished.
+                                    this.checkIfSuccessStoreComplete();
+                                    //update the ongoing process
+                                    this.updateOngoingRequest(Controller.STORE_PROCESS);
+                                    Thread.sleep(1000);
+                                }
+                                System.out.println("SUCESS FULL STORE for file : " + formattedRequest.arguments.get("filename"));
+                                this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
+                                Controller.removeOngoingProcess(this.currentOngoingProcess);
+
+                                break;
+                            case Controller.LOAD_OPERATION:
+                                response = this.processLoadOperation(formattedRequest.arguments.get("filename"));
+                                this.sendResponse(response, outStream);
+                                break;
+                            case Controller.REMOVE_OPERATION:
+                                this.processRemoveOperation(formattedRequest.arguments.get("filename"), outStream);
+                                //todo do the same for remove operation
+                                if (!this.finishedOngoingRequest) {
+                                    //check if we have finished.
+                                    this.checkIfSuccessRemoveComplete();
+                                    //update the ongoing process
+                                    this.updateOngoingRequest(Controller.REMOVE_PROCESS);
+                                    System.out.println("is remove completed? " + this.finishedOngoingRequest + " current success count: " + this.currentOngoingProcess.numberOfReceivedSuccessRequests);
+                                    Thread.sleep(1000);
+                                }
+                                this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
+
+                                break;
+                            case Controller.JOIN_OPERATION:
+                                Thread.currentThread().setPriority(7);
+                                this.processJoinOperation(formattedRequest.arguments.get("port"));
+                                break;
+                            case Controller.STORE_ACK_DSTORE:
+                                Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
+                                this.processStoreACKOperation(formattedRequest.arguments.get("filename"), this.clientSocket.getPort());
+                                break;
+                            case Controller.REMOVE_ACK_DSTORE:
+                                Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
+                                this.processRemoveACKOperation(formattedRequest.arguments.get("filename"), clientSocket.getPort());
+                                break;
+                        }
+                    } catch (Throwable e) {
+                        this.processError((e.getMessage() != null ? e.getMessage() : e.toString()), outStream);
                     }
 
-                    String response;
-                    operation = formattedRequest.operation;
-                    this.request_type = operation;
-                    switch (formattedRequest.operation) {
-                        case Controller.LIST_OPERATION:
-                            Thread.currentThread().setPriority(7);
-                            response = this.processListOperation();
-                            this.sendResponse(response, outStream);
-                            break;
-                        case Controller.STORE_OPERATION:
-                            response = this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"), outStream);
-                            this.sendResponse(response, outStream);
-                            while (!this.finishedOngoingRequest) {
-                                //check if we have finished.
-                                this.checkIfSuccessStoreComplete();
-                                //update the ongoing process
-                                this.updateOngoingRequest(Controller.STORE_PROCESS);
-                                Thread.sleep(1000);
-                            }
-                            System.out.println("SUCESS FULL STORE for file : " + formattedRequest.arguments.get("filename"));
-                            this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
-                            Controller.removeOngoingProcess(this.currentOngoingProcess);
-
-                            break;
-                        case Controller.LOAD_OPERATION:
-                            response = this.processLoadOperation(formattedRequest.arguments.get("filename"));
-                            this.sendResponse(response, outStream);
-                            break;
-                        case Controller.REMOVE_OPERATION:
-                            this.processRemoveOperation(formattedRequest.arguments.get("filename"), outStream);
-                            //todo do the same for remove operation
-                            if (!this.finishedOngoingRequest) {
-                                //check if we have finished.
-                                this.checkIfSuccessRemoveComplete();
-                                //update the ongoing process
-                                this.updateOngoingRequest(Controller.REMOVE_PROCESS);
-                                System.out.println("is remove completed? " + this.finishedOngoingRequest + " current success count: " + this.currentOngoingProcess.numberOfReceivedSuccessRequests);
-                                Thread.sleep(1000);
-                            }
-                            this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
-
-                            break;
-                        case Controller.JOIN_OPERATION:
-                            Thread.currentThread().setPriority(7);
-                            this.processJoinOperation(formattedRequest.arguments.get("port"));
-                            break;
-                        case Controller.STORE_ACK_DSTORE:
-                            Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
-                            this.processStoreACKOperation(formattedRequest.arguments.get("filename"), this.clientSocket.getPort());
-                            break;
-                        case Controller.REMOVE_ACK_DSTORE:
-                            Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
-                            this.processRemoveACKOperation(formattedRequest.arguments.get("filename"), clientSocket.getPort());
-                            break;
-                    }
+                    request = this.inStream.readLine();
                 }
-                this.clientSocket.close();
-
                 System.out.println("Request for operation " + operation + " terminated Successfully. Closing thread...");
 
             } catch (Throwable e) {
-                System.out.println("Exception : " + (e.getMessage() == null ? e.toString() : e.getMessage()) + " for request type : " + this.request_type + ". Closing thread...");
-                this.processError(e.getMessage(), outStream);
+                this.processError((e.getMessage() != null ? e.getMessage() : e.toString()), outStream);
             }
         }
 
@@ -363,35 +367,37 @@ public class Controller {
 
         //LIST OPERATION
         private String processListOperation() throws Exception {
+            synchronized (Controller.lock)
+            {
+                Controller.checkIfEnoughDstores(false);
+                String rtrn_request = Controller.LIST_RESPONSE + " ";
+                ArrayList<String> usedFiles = new ArrayList<String>();
+                List<HashMap<String, String>> currFileList;
+                String currFileName;
 
-            Controller.checkIfEnoughDstores(false);
-            String rtrn_request = Controller.LIST_RESPONSE + " ";
-            ArrayList<String> usedFiles = new ArrayList<String>();
-            List<HashMap<String, String>> currFileList;
-            String currFileName;
-
-            //because a dstore might not be up to date with the other dstores, we need to see what files are in the overall distributed sever storage
-            for (DSTORE_DATA eachDstore : Controller.dStores) {
-                currFileList = eachDstore.files;
-                for (HashMap<String, String> eachFile : currFileList) {
-                    currFileName = eachFile.get("filename");
-                    if (!usedFiles.contains(currFileName)) {
-                        usedFiles.add(currFileName);
+                //because a dstore might not be up to date with the other dstores, we need to see what files are in the overall distributed sever storage
+                for (DSTORE_DATA eachDstore : Controller.dStores) {
+                    currFileList = eachDstore.files;
+                    for (HashMap<String, String> eachFile : currFileList) {
+                        currFileName = eachFile.get("filename");
+                        if (!usedFiles.contains(currFileName)) {
+                            usedFiles.add(currFileName);
+                        }
                     }
                 }
+
+                int i = 1;
+                String currAppend = "";
+
+                for (String filename : usedFiles) {
+                    currAppend = filename + ((i == usedFiles.size()) ? " " : "");
+
+                    rtrn_request += currAppend;
+                    i++;
+                }
+
+                return rtrn_request;
             }
-
-            int i = 1;
-            String currAppend = "";
-
-            for (String filename : usedFiles) {
-                currAppend = filename + ((i == usedFiles.size()) ? " " : "");
-
-                rtrn_request += currAppend;
-                i++;
-            }
-
-            return rtrn_request;
         }
 
         //STORE OPERATION
