@@ -1,50 +1,18 @@
 import java.io.*;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.net.*;
+import java.util.*;
 
-/*
-The Dstore class.
+class Dstore{
+    static int port = 0;
+    static int cport = 0;
+    static int timeout = 0;
+    static String file_folder = null;
+    // (fileName, fileSize) is a tuple from the file_details hashtable
+    static Hashtable<String, Integer> file_details = new Hashtable<>();
+    static ServerSocket ss;
+    static Socket socket_to_controller;
 
-@author Andrei Popa(ap4u19@soton.ac.uk)
- */
-public class Dstore {
-    /* Define constants start */
-
-    //expected incoming requests from Controller
-    private static final String REMOVE_OPERATION = "REMOVE";
-
-
-    //expected incoming requests from client
-    private static final String STORE_OPERATION = "STORE";
-    private static final String LOAD_DATA_OPERATION = "LOAD_DATA";
-
-    //expected outgoing requests to Controller
-    private static final String STORE_ACK = "STORE_ACK";
-    private static final String REMOVE_ACK = "REMOVE_ACK";
-
-    //expected outgoing requests to Client
-    private static final String ACK = "ACK";
-
-    //send to constants
-    private static final String CONTROLLER_TARGET = "CONTROLLER";
-    private static final String CLIENT_TARGET = "CLIENT";
-
-    /* Define constants end */
-
-    public int dPort;//the port of the dStore that the controller with communicate with
-    public static int cPort; //the port of the controller
-    public int timeout; //the timeout
-    public static String folder_path; //the file_folder
-    public static String currentOperation; //for updating the index for that specific DStore to reflect the process that is undertaken
-    public static List<FILE> files = new ArrayList<FILE>(); //for keeping track of the files that each DStore has
-    private static ServerSocket socket;//the socket where all the communications will happen(both with Controller and Client)
-    private static Socket controllerSocket;
-    static private Object lock = new Object();//for thread locking
-
+    private static Object lock = new Object();//for dealing with Thread race conditions
 
     class INCOMING_REQUEST {
         public String operation;
@@ -63,17 +31,17 @@ public class Dstore {
             String request_type = segments[0];
             //decide if the the request type is correct or not
             switch (request_type) {
-                case Dstore.REMOVE_OPERATION:
-                    this.operation = Dstore.REMOVE_OPERATION;
+                case Protocol.REMOVE_TOKEN:
+                    this.operation = Protocol.REMOVE_TOKEN;
                     this.prepareRemoveOperation(segments);
                     break;
-                case Dstore.LOAD_DATA_OPERATION:
-                    this.operation = Dstore.LOAD_DATA_OPERATION;
+                case Protocol.LOAD_DATA_TOKEN:
+                    this.operation = Protocol.LOAD_DATA_TOKEN;
                     this.prepareLoadDataOperation(segments);
                     break;
 
-                case Dstore.STORE_OPERATION:
-                    this.operation = Dstore.STORE_OPERATION;
+                case Protocol.STORE_TOKEN:
+                    this.operation = Protocol.STORE_TOKEN;
                     this.prepareStoreOperation(segments);
                     break;
 
@@ -111,288 +79,267 @@ public class Dstore {
 
     }
 
-    static class FILE {
-        public String filename;
-        public String filesize;
-        public InputStream fileInputStream;
+    public class CONTROLLER_THREAD implements Runnable
+    {
+        private Socket socketTo_controller;
 
-        public FILE(String filename, String filesize) {
-            this.filename = filename;
-            this.filesize = filesize;
+        private OutputStream outFileStream_controller;
+        private InputStream inFileStream_controller;
+
+        private BufferedReader inTextStream_controller;
+        private PrintWriter outTextStream_controller;
+
+        public CONTROLLER_THREAD (Socket socketTo_controller) {this.socketTo_controller = socketTo_controller;}
+
+        public void run()
+        {
+            try
+            {
+                this.outFileStream_controller = this.socketTo_controller.getOutputStream();
+                this.inFileStream_controller = this.socketTo_controller.getInputStream();
+
+                this.inTextStream_controller = new BufferedReader(new InputStreamReader(this.inFileStream_controller));
+                this.outTextStream_controller = new PrintWriter(new OutputStreamWriter(this.outFileStream_controller));
+
+                //join the controller server
+                this.outTextStream_controller.println(Protocol.JOIN_TOKEN + " " + Dstore.port);
+                this.outTextStream_controller.flush();
+
+                //waiting for commands from Controller
+                String line;
+                while((line = this.inTextStream_controller.readLine()) != null)
+                {
+                    System.out.println("Incoming request from Controller: " + line);
+                    INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(line);
+
+                    if(formattedRequest.invalidOperation || formattedRequest.invalidArguments)
+                        throw new Exception("Invalid Request from Controller" + line);
+
+                    switch (formattedRequest.operation) {
+                        case (Protocol.REMOVE_TOKEN) :
+                            this.processRemoveOperation(formattedRequest.arguments.get("filename"));
+                            break;
+                    }
+
+                }
+
+
+            }catch (Throwable e) {
+                System.out.println("Error when receiving request from Controller: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            }
         }
 
-        public void setFileInputStream(InputStream fileInputStream) {
-            this.fileInputStream = fileInputStream;
+        private void processRemoveOperation(String filename)
+        {
+            File file = new File(Dstore.file_folder + File.separator + filename);
+            String responseTo_controller;
+            if(file.delete()) {
+                Dstore.file_details.remove(filename);
+                responseTo_controller = Protocol.REMOVE_ACK_TOKEN + " " + filename;
+
+            } else {
+                responseTo_controller = Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + filename;
+            }
+            this.outTextStream_controller.println(responseTo_controller);
+            this.outTextStream_controller.flush();
         }
+
     }
 
-    class REQUEST_THREAD implements Runnable {
-        private Socket socketToOutput;//would be either Controller or Dstore
+    class CLIENT_THREAD implements Runnable
+    {
+        private Socket socketTo_client;
 
-        //for text messages
-        private BufferedReader textInStream;
-        private PrintWriter textOutStream;
-        private PrintWriter outTextStreamController;
+        //for Client communication
+        private OutputStream outFileStream_client;
+        private InputStream inFileStream_client;
+
+        private BufferedReader inTextStream_client;
+        private PrintWriter outTextStream_client;
+
+        //for Controller communication
+        private OutputStream outFileStream_controller;
+        private InputStream inFileStream_controller;
+
+        private BufferedReader inTextStream_controller;
+        private PrintWriter outTextStream_controller;
 
 
-        //for file transfers
-        private OutputStream fileOutStream;
-        private InputStream fileInStream;
+        public CLIENT_THREAD (Socket socket) {this.socketTo_client = socket;}
 
+        public void run()
+        {
+            try
+            {
+                this.outFileStream_controller = socket_to_controller.getOutputStream();
+                this.inFileStream_controller = socket_to_controller.getInputStream();
+                this.inTextStream_controller = new BufferedReader(new InputStreamReader(this.inFileStream_controller));
+                this.outTextStream_controller = new PrintWriter(new OutputStreamWriter(this.outFileStream_controller));
 
-        private String request_type;
+                this.outFileStream_client = this.socketTo_client.getOutputStream();
+                this.inFileStream_client = this.socketTo_client.getInputStream();
+                this.inTextStream_client = new BufferedReader(new InputStreamReader(this.inFileStream_client));
+                this.outTextStream_client = new PrintWriter(new OutputStreamWriter(this.outFileStream_client));
 
-        public REQUEST_THREAD(Socket socket) {
-            this.socketToOutput = socket;
+                int bufLen;
+                byte[] buffer = new byte[1000];
+
+                while((bufLen = this.inFileStream_client.read(buffer)) != -1){
+                    String request = new String(buffer, 0, bufLen);
+                    request = request.replaceAll("\n","");
+                    System.out.println("Incoming request from client : " + request);
+                    INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
+
+                    if(formattedRequest.invalidOperation || formattedRequest.invalidArguments)
+                        throw new Exception("Invalid Request from Client" + request);
+
+                    switch (formattedRequest.operation) {
+                        case (Protocol.STORE_TOKEN):
+                            this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"));
+                            break;
+                        case (Protocol.LOAD_DATA_TOKEN):
+                            this.processLoadOperation(formattedRequest.arguments.get("filename"));
+                            break;
+                    }
+                }
+
+            } catch (Throwable e){
+                System.out.println("Error when receiving request from Client: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            }
+
         }
 
-        public void run() {
+
+        public void processStoreOperation(String filename, String filesize) throws Throwable
+        {
+            int fileSize = Integer.parseInt(filesize);
+            File file = new File(file_folder + File.separator + filename);
             try {
-                this.textInStream = new BufferedReader(new InputStreamReader(this.socketToOutput.getInputStream()));
-                this.textOutStream = new PrintWriter(this.socketToOutput.getOutputStream());
+                if (file.createNewFile()) {
+                    System.out.println("Sending ACK response to client ...");
+                    //send ack response to client
+                    this.outTextStream_client.println(Protocol.ACK_TOKEN);
+                    this.outTextStream_client.flush();
+                    System.out.println("Sending ACK response to client - success");
+
+                    FileOutputStream outFile = new FileOutputStream(file);
+                    byte[] data;
+                    System.out.println("Reading N bytes ...");
+                    data = this.inFileStream_client.readNBytes(fileSize);
+                    System.out.println("Reading N bytes - success");
+
+                    System.out.println("Writing the file ...");
+                    outFile.write(data);
+                    outFile.close();
+                    System.out.println("Writing the file - success");
+
+                    System.out.println("Sending ACK response to Controller ...");
+                    //send ack response to controller.
+                    this.outTextStream_controller.println(Protocol.STORE_ACK_TOKEN + " " + filename);
+                    this.outTextStream_controller.flush();
+                    System.out.println("Sending ACK response to Controller - success");
+                    file_details.put(filename, fileSize);
+
+                } else {
+                    System.out.println("File already exists.");
+                    this.socketTo_client.close();
+                    throw new Error("File already exists");
+                }
+            } catch (Throwable e) {
+                throw new Error("Error when storing file : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            }
+        }
 
 
-                this.fileOutStream = this.socketToOutput.getOutputStream();
+        public void processLoadOperation(String filename) throws Throwable
+        {
+            try
+            {
+                if (file_details.containsKey(filename)) {
+                    File inputFile = new File(filename);
+                    FileInputStream inf = new FileInputStream(Dstore.file_folder + File.separator + inputFile);
+                    int buflen;
+                    byte[] buf = new byte[1000];
 
+                    while((buflen = inf.read(buf)) != -1) {
+                        this.outFileStream_client.write(buf, 0, buflen);
+                    }
+                    inf.close();
 
-                String request;
-                request = textInStream.readLine();
+                } else {
+                    this.socketTo_client.close();
+                    throw new Error("Dstore does not have the requested file : " + filename);
 
-                System.out.println("Incoming request : " + request);
-                INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
-
-                if (formattedRequest.invalidOperation || formattedRequest.invalidArguments) {
-                    throw new Exception("invalid request: " + request); //todo change here
                 }
 
-                String response;
-                this.request_type = formattedRequest.operation;
 
-                switch (formattedRequest.operation) {
-                    case Dstore.REMOVE_OPERATION:
-                        response = this.processRemoveOperation(formattedRequest.arguments.get("filename"));
-                        this.sendTextResponse(response, new PrintWriter(Dstore.controllerSocket.getOutputStream()));
-                        break;
-                    case Dstore.LOAD_DATA_OPERATION:
-                        FILE fileToSend = this.processLoadDataOperation(formattedRequest.arguments.get("filename"));
-                        this.sendFileResponse(fileToSend, this.fileOutStream);
-                        break;
-                    case Dstore.STORE_OPERATION:
-                        response = this.processStoreOperation(formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"));
-                        System.out.println("Sending store ACK response to controller. : " + response);
-                        this.sendResponseToController(response);
-                        System.out.println("ACK response to controller sent.");
-                        break;
-
-                }
-
-                this.socketToOutput.close();
-                System.out.println("Request for operation " + request_type + " terminated Successfully. Closing thread...");
 
             } catch (Throwable e) {
-                System.out.println("Exception : " + (e.getMessage() == null ? e.toString() : e.getMessage()) + " for request type : " + this.request_type + ". Closing thread...");
-                this.handleError(e.getMessage(), textOutStream);
+                throw new Error("Error when loading file : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             }
         }
 
 
-        private String processRemoveOperation(String filename) throws Exception {
-            synchronized (Dstore.lock) {
-                FILE fileData = Dstore.getFile(filename);
-                String rtrn_request = null;
+    }
 
-                File file = new File(Dstore.folder_path + fileData.filename);
-                //delete the file
-                if (file.delete()) {
-                    System.out.println("File" + filename + "deleted successfully");
-                    rtrn_request = Dstore.REMOVE_ACK + " " + filename;
-                } else {
-                    throw new Exception("The file does not exist");
+
+
+
+
+    public static void main (String[] args ) throws Throwable
+    {
+        Dstore sys = new Dstore();
+        sys.main2(args);
+    }
+
+
+
+    public void main2(String[] args) throws IOException {
+        try{
+            System.out.println(args[0]+" "+args[1]+" "+args[2]+" "+args[3]);
+            //dstore port
+            port = Integer.parseInt(args[0]);
+            //controller port
+            cport = Integer.parseInt(args[1]);
+            timeout = Integer.parseInt(args[2]);
+            file_folder = args[3];
+            File dstoreFolder = new File(file_folder);
+            if (!dstoreFolder.exists())
+                if (!dstoreFolder.mkdir()) throw new RuntimeException("Cannot create dstore folder (folder absolute path: " + dstoreFolder.getAbsolutePath() + ")");
+            try {
+                try {
+                    socket_to_controller = new Socket("localhost", cport);
+                    //communication tools for controller <-> client
+                    Thread controllerThread = new Thread(new CONTROLLER_THREAD(socket_to_controller));
+                    controllerThread.start();
+                } catch (Throwable e) {
+                    System.out.println("Unexpected System error when listening for Controller requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
                 }
 
-                //remove file from the list
-                Dstore.removeFile(filename);
+                try {
+                    ss = new ServerSocket(port);
+                    for(;;) {
+                        try {
+                            if (socket_to_controller.isConnected()) {
+                                System.out.println("Dstore is connected to the Controller server. Listening to Client Requests.");
+                                Socket socket_to_client = ss.accept();
+                                Thread clientThread = new Thread(new CLIENT_THREAD(socket_to_client));
+                                clientThread.start();
+                            } else {
+                            }
+                            System.out.println("Dstore is not connected to the Controller server.");
 
-                return rtrn_request;
-            }
-        }
-
-        private FILE processLoadDataOperation(String filename) throws Exception {
-            synchronized (Dstore.lock) {
-                FILE fileData = Dstore.getFile(filename);
-
-                File file = new File(Dstore.folder_path + fileData.filename);
-                InputStream inputFileStream;
-
-                if (file.exists()) {
-                    inputFileStream = new FileInputStream(file);
-                    fileData.setFileInputStream(inputFileStream);
-                } else {
-                    throw new Exception("The file does not exist");
+                        }catch (Throwable e){
+                            System.out.println("error"+e);
+                        }
+                    }
+                } catch (Throwable e){
+                    System.out.println("Unexpected System error when listening for Client requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
                 }
 
-                return fileData;
-            }
-        }
-
-        private String processStoreOperation(String filename, String filesize) throws Exception {
-
-            System.out.println("Sending ACK Text response to client...");
-            //send ACK to client
-            this.sendTextResponse(Dstore.ACK, this.textOutStream);
-            //prepare success response to be sent to Controller.
-            String rtrn_request = Dstore.STORE_ACK + " " + filename;
-
-            System.out.println("Copying file...");
-
-            File newFile = new File(Dstore.folder_path + filename);
-
-            if(newFile.createNewFile()) {
-
-                FileOutputStream fileOutputStream = new FileOutputStream(newFile);
-
-                int fileSizeInt = Integer.parseInt(filesize);
-
-                System.out.println("file size : " + fileSizeInt);
-
-                System.out.println("reading bytes");
-                this.fileInStream = this.socketToOutput.getInputStream();
-                System.out.println("reading bytes22222323232");
-                byte[] bytes = this.fileInStream.readNBytes(fileSizeInt);
-                byte[] buf = new byte[1000];
-
-
-                System.out.println("writing bytes");
-                fileOutputStream.write(bytes);
-                fileOutputStream.close();
-
-                System.out.println("File copied.");
-                //add the file for internal use
-                Dstore.addFile(filename, filesize);
-
-                return rtrn_request;
-            }
-
-            return rtrn_request;
-        }
-
-
-        private void handleError(String errorMessage, PrintWriter outStream) {
-
-        }
-
-        private void sendTextResponse(String message, PrintWriter outStream) {
-            outStream.print(message);
-            outStream.flush();
-        }
-
-        private void sendFileResponse(FILE fileData, OutputStream outPutS) throws Exception {
-            int fileSize = Integer.parseInt(fileData.filesize);
-
-            byte[] bytes = new byte[16 * 1024];
-            InputStream fileInputStream = fileData.fileInputStream;
-            int count = 0;
-            while ((count = fileInputStream.read(bytes)) > 0) {
-                outPutS.write(bytes, 0, count);
-            }
-            outPutS.close();
-        }
-
-        private void sendResponseToController(String message) throws Exception {
-            synchronized (Dstore.lock) {
-                Dstore.controllerSocket = new Socket("localhost", Dstore.cPort);
-                PrintWriter outPutStream = new PrintWriter(Dstore.controllerSocket.getOutputStream());
-                this.sendTextResponse(message, outPutStream);
-                outPutStream.close();
-            }
-
-        }
-
-        private void sendTextResponseToClient(String message) throws Exception {
-            synchronized (Dstore.lock) {
-
-            }
-        }
-
-
-    }
-
-
-    public static void main(String[] args) throws Exception {
-        String port = args[0];
-        String cPort = args[1];
-        String timeoutPer = args[2];
-        String fileFolder = args[3];
-        System.out.println("Starting database server...");
-        Dstore sysStart = new Dstore(Integer.parseInt(port), Integer.parseInt(cPort), Integer.parseInt(timeoutPer), fileFolder);
-    }
-
-
-    public Dstore(int port, int cPort, int timeout, String file_folder) {
-        this.dPort = port;
-        Dstore.cPort = cPort;
-        this.timeout = timeout;
-        Dstore.folder_path = file_folder;
-        try {
-            this.initialiseSystem();
-
-        } catch (Exception e) {
-
-        }
-    }
-
-
-    private void initialiseSystem() throws Exception {
-        //setup the port to listen for incoming requests from Controller/Client
-        Dstore.socket = new ServerSocket(this.dPort);
-        Dstore.controllerSocket = new Socket("localhost", Dstore.cPort);
-        System.out.println("Dstore Database Server started. Joining Server ...");
-        //connect to the Controller
-        this.connectToServer();
-        System.out.println("Connected to server. Listening to requests.");
-        //wait for incoming connections
-        this.waitForRequests();
-
-    }
-
-    private void connectToServer() throws Exception {
-        String request = Controller.JOIN_OPERATION + " " + this.dPort;
-        PrintWriter outPutStream = new PrintWriter(Dstore.controllerSocket.getOutputStream());
-        outPutStream.print(request);
-        outPutStream.flush();
-        outPutStream.close();
-    }
-
-    private void waitForRequests() throws Exception {
-        for (; ; ) {
-            Socket client = Dstore.socket.accept();
-            //create new thread for the ongoing process.
-            Thread request = new Thread(new REQUEST_THREAD(client));
-            request.start();
-        }
-    }
-
-    private static FILE getFile(String filename) throws Exception {
-        for (FILE eachFile : Dstore.files) {
-            if (eachFile.equals(filename)) {
-                return eachFile;
-            }
-        }
-
-        throw new Exception("File not found");
-    }
-
-    private static void addFile(String filename, String filesize) {
-        Dstore.files.add(new FILE(filename, filesize));
-    }
-
-    private static void removeFile(String filename) {
-        int i = 0;
-        for (FILE eachFile : Dstore.files) {
-            if (eachFile.filename.equals(filename)) {
-                Dstore.files.remove(i);
-            }
-            i++;
-        }
+            } catch (Throwable e){
+                System.out.println("Unexpected System error when listening for overall requests : " + (e.getMessage() != null ? e.getMessage() : e.toString())); }
+        }catch(Throwable e){
+            System.out.println("Unexpected System error when initialising the server : " + (e.getMessage() != null ? e.getMessage() : e.toString())); }
     }
 }

@@ -12,12 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /*
 Controller class
@@ -78,12 +73,8 @@ public class Controller {
     static private List<DSTORE_DATA> dStores = new ArrayList<DSTORE_DATA>(); //for saving && keeping track of all Dstores(this is the index from the specSheet);
     static private List<ONGOING_PROCESS> ongoingProcesses = new ArrayList<ONGOING_PROCESS>();
     static private Object lock = new Object();//for thread locking
-    static private ReentrantLock lock2 = new ReentrantLock();
 
     //
-    static private ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
-    static private Lock writeLock = readWriteLock.writeLock();
-    static private Lock readLock = readWriteLock.readLock();
 
 
     class DSTORE_DATA {
@@ -614,32 +605,6 @@ public class Controller {
         }
     }
 
-    /*
-    static private ONGOING_PROCESS getOngoingProcessByDPort(int dPort, String process_type) throws Exception
-    {
-        for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
-            if (currOngoingProcess.processType.equals(process_type)) {
-                if (currOngoingProcess.dPorts.contains(Integer.toString(dPort))) {
-                    return currOngoingProcess;
-                }
-            }
-        }
-        throw new Exception("unknown dPort");
-    }
-     */
-    /*
-    static private ONGOING_PROCESS getOngoingProcessByThreadId(String process_type, long threadId) throws Exception {
-        System.out.println("Searching by Threads by id ...");
-        for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
-            System.out.println("Current thread id : " + currOngoingProcess.ThreadId);
-            if(currOngoingProcess.processType.equals(process_type) && currOngoingProcess.ThreadId == threadId){
-                return currOngoingProcess;
-            }
-        }
-        throw new Exception("Unknown Thread ID. Requested : " + threadId);
-    }
-     */
-
     static protected ONGOING_PROCESS getOngoingProcessByFileName(String process_type, String filename) throws Exception {
         //System.out.println("Searching by file name ...");
         for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
@@ -692,13 +657,6 @@ public class Controller {
         }
         return false;
     }
-
-    /*
-    private void sendResponse(String response, PrintWriter outStream) {
-        outStream.println(response);
-        outStream.flush();
-    }
-    */
 
 //todo implement rebalance operations when everything else if finished
 
