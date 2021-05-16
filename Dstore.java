@@ -1,3 +1,4 @@
+import javax.rmi.ssl.SslRMIClientSocketFactory;
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -246,6 +247,7 @@ class Dstore{
                     file_details.put(filename, Integer.valueOf(fileSize));
 
                 } else {
+                    //todo should you close the socket client here?
                     System.out.println("File already exists.");
                     this.socketTo_client.close();
                     throw new Error("File already exists");
@@ -258,29 +260,32 @@ class Dstore{
 
         public void processLoadOperation(String filename) throws Throwable
         {
-            try
-            {
-                if (file_details.containsKey(filename)) {
-                    File inputFile = new File(filename);
-                    FileInputStream inf = new FileInputStream(Dstore.file_folder + File.separator + inputFile);
-                    int buflen;
-                    byte[] buf = new byte[1000];
+            synchronized (Dstore.lock) {
+                try {
+                    System.out.println("LOADING FILE OPERATION ...");
+                    if (file_details.containsKey(filename)) {
+                        File inputFile = new File(filename);
+                        FileInputStream inf = new FileInputStream(Dstore.file_folder + File.separator + inputFile);
+                        int buflen;
+                        byte[] buf = new byte[1000];
+                        System.out.println("LOADING FILE OPERATION started...");
+                        while ((buflen = inf.read(buf)) != -1) {
+                            this.outFileStream_client.write(buf, 0, buflen);
+                        }
+                        inf.close();
+                        System.out.println("LOADING FILE OPERATION finished...");
 
-                    while((buflen = inf.read(buf)) != -1) {
-                        this.outFileStream_client.write(buf, 0, buflen);
+                    } else {
+                        //todo should you close the socket client here?
+                        this.socketTo_client.close();
+                        throw new Error("Dstore does not have the requested file : " + filename);
+
                     }
-                    inf.close();
 
-                } else {
-                    this.socketTo_client.close();
-                    throw new Error("Dstore does not have the requested file : " + filename);
 
+                } catch (Throwable e) {
+                    throw new Error("Error when loading file : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
                 }
-
-
-
-            } catch (Throwable e) {
-                throw new Error("Error when loading file : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             }
         }
 
@@ -295,6 +300,7 @@ class Dstore{
                 responseTo_controller = Protocol.REMOVE_ACK_TOKEN + " " + filename;
 
             } else {
+                //todo should you close the socket client here?
                 responseTo_controller = Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + filename;
             }
             System.out.println("Sending response to Controller... : " + responseTo_controller );

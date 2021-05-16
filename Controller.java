@@ -118,6 +118,18 @@ public class Controller {
             return false;
         }
 
+        public HashMap<String, String> getFileInfoByFileName(String filename)
+        {
+            int i = 0;
+            for (HashMap<String, String> currFile : this.files) {
+                if(currFile.get("filename").equals(filename)) {
+                    return this.files.get(i);
+                }
+                i++;
+            }
+            return null;
+        }
+
 
 
     }
@@ -510,16 +522,21 @@ public class Controller {
 
         //LOAD OPERATION
         private String processLoadOperation(String filename) throws Exception {
-            synchronized (Controller.lock) {
+            synchronized (Controller.lock)
+            {
+                System.out.println("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX SEARCHING FOR FILE : " + filename);
+                Controller.printDstoreData();
                 Controller.checkIfEnoughDstores(false);
                 String rtrn_request = Controller.LOAD_FROM_RESPONSE;
                 //get the first dStore that has the file
 
                 DSTORE_DATA selectedDstore = null;
+                String filesize = "";
 
                 for (DSTORE_DATA eachDstore : Controller.dStores) {
                     if (eachDstore.hasFile(filename)) {
                         selectedDstore = eachDstore;
+                        filesize = eachDstore.getFileInfoByFileName(filename).get("filesize");
                         break;
                     }
                 }
@@ -533,6 +550,8 @@ public class Controller {
 
                 append += Integer.toString(selectedDstore.dPort);
                 rtrn_request += append;
+                rtrn_request += " ";
+                rtrn_request += filesize;
                 //request should look something like "LOAD_FROM port filesize"
                 return rtrn_request;
             }
