@@ -8,10 +8,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /*
@@ -129,8 +126,6 @@ public class Controller {
             }
             return null;
         }
-
-
 
     }
 
@@ -631,6 +626,157 @@ public class Controller {
             ControllerLogger.getInstance().log(errorMessage);
 
         }
+    }
+
+    //the rebalance operation will be on its own thread
+    class REBALANCE_OPERATION implements Runnable
+    {
+        private List<DSTORE_DATA> testDstoreData;
+        private List<DSTORE_DATA> realDstoreData;
+        private List<HashMap<String, String>> filesToDistribute;
+        private boolean newDstore;
+        private int R;
+        private int N;
+        private int F;
+
+        public REBALANCE_OPERATION(boolean newDstore){this.newDstore = newDstore; this.testDstoreData = Controller.dStores;}
+
+        public void run()
+        {
+            this.setFilesToDistribute();
+            this.setVariables();
+            this.distributeEvenly();
+            if(this.eachDstoreHasCorrectFileNumber()){
+                // an element would look like this = (Dstore, {"remove" => [filesToRemove], "add" => [filesToAdd]})
+                // where each files array would be List<HashMap<String, String>>
+                // and each Dstore would be DSTORE_DATA
+                List<HashMap<DSTORE_DATA, HashMap<String, List<HashMap<String, String>>>>> dStoresOperations = this.getRebalanceOperations();
+                for (HashMap<DSTORE_DATA, HashMap<String, List<HashMap<String, String>>>> eachDstoreOperation : dStoresOperations) {
+                    //todo figure out how to get the files to remove
+                    //todo figure out how to get the files to add
+                    //todo figure out how to get the dstore
+
+                }
+
+
+
+            } else if (this.newDstore) {
+                //if we dont have the correct file number but we have a new Dstore then we should copy all the files to the new Dstore. TODO IMPLEMENT
+            }
+
+        }
+
+        private void setVariables()
+        {
+            synchronized (Controller.lock)
+            {
+                this.R = Controller.rFactor;
+                this.N = Controller.currRFator;
+                this.F = filesToDistribute.size();
+                this.realDstoreData = Controller.dStores;
+            }
+        }
+
+        private void setFilesToDistribute()
+        {//TODO HERE YOU WOULD ACTUALLY HAVE TO CALL EACH DSTORE TO GET ITS FILES.
+            synchronized (Controller.lock)
+            {
+                List<HashMap<String, String>> returnFilesArr = new ArrayList<HashMap<String, String>>();
+                List<String> filesUsed = new ArrayList<String>();
+
+                for (DSTORE_DATA eachDstore : Controller.dStores){
+                 for (HashMap<String, String> eachFile : eachDstore.files) {
+                     if(filesUsed.contains(eachFile.get("filename"))){
+                         filesUsed.add(eachFile.get("filename"));
+                         returnFilesArr.add(eachFile);
+                     }
+                 }
+             }
+                this.filesToDistribute = returnFilesArr;
+            }
+        }
+
+        private void distributeEvenly()
+        {
+            List<DSTORE_DATA> finalTestDstoreData = new ArrayList<>();
+            List<DSTORE_DATA> testDstoreDataToUse = new ArrayList<>();
+            testDstoreDataToUse = this.testDstoreData;
+
+            //first clear the existing files to start fresh.
+            for (DSTORE_DATA eachDstore : testDstoreDataToUse) {
+                eachDstore.files = new ArrayList<>();
+
+            }
+            List<List<String>> result = new ArrayList<>();
+            int dStorePartitions = this.testDstoreData.size();
+            for (int i = 0; i < dStorePartitions; i++)
+                finalTestDstoreData.add(testDstoreDataToUse.get(i));
+
+            Iterator<HashMap<String, String>> iterator = this.filesToDistribute.iterator();
+            for(int i = 0; iterator.hasNext(); i++)
+                finalTestDstoreData.get(i % dStorePartitions).addFile(iterator.next().get("filename"), iterator.next().get("filesize"));
+
+            this.testDstoreData = finalTestDstoreData;
+        }
+
+        private boolean eachDstoreHasCorrectFileNumber()
+        {
+            int lowerBound = (int) Math.floor((this.R * this.F) / this.N);
+            int higherBound = (int) Math.ceil((this.R * this.F) / this.N);
+
+            for (DSTORE_DATA eachDstore : this.testDstoreData) {
+                int fileNumber = eachDstore.files.size();
+                if(! (lowerBound <= fileNumber && fileNumber >= higherBound))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private List<HashMap< DSTORE_DATA, HashMap<String, List<HashMap<String, String>>>>> getRebalanceOperations()
+        {
+            List<HashMap<DSTORE_DATA, HashMap<String, List<HashMap<String, String>>>>> rtrnRebalanceArr = new ArrayList<>();
+
+            for (DSTORE_DATA eachTestDstore : this.testDstoreData) {
+                HashMap<DSTORE_DATA, HashMap<String, List<HashMap<String, String>>>> dStoreOperation = new HashMap<>();
+                HashMap<String, List<HashMap<String, String>>> operations = new HashMap<>();
+                DSTORE_DATA realDstoreDataSave = null;
+                List<HashMap<String, String>> filesToRemove = new ArrayList<>();
+                List<HashMap<String, String>>filesToAdd = new ArrayList<>();
+                List<String> commonFiles = new ArrayList<>();
+
+                //take the common files
+                for (DSTORE_DATA eachRealDstore : this.realDstoreData){
+                    if(eachTestDstore.dPort == eachRealDstore.dPort) {
+                        for (HashMap<String, String> eachRealFile : eachRealDstore.files) {
+                            if(eachRealDstore.hasFile(eachRealFile.get("filename"))){
+                                realDstoreDataSave = eachRealDstore;
+                                commonFiles.add(eachRealFile.get("filename"));
+                            } else {
+                                filesToRemove.add(eachRealFile);
+                            }
+                        }
+                        break;
+                    }
+                }
+                //now add the new files
+                for (HashMap<String, String> eachTestFile : eachTestDstore.files) {
+                    if(! commonFiles.contains(eachTestFile.get("filename"))){
+                        filesToAdd.add(eachTestFile);
+                    }
+                }
+                operations.put("remove", filesToRemove);
+                operations.put("add", filesToAdd);
+                dStoreOperation.put(realDstoreDataSave, operations); //todo can it really be null at this point?
+                rtrnRebalanceArr.add(dStoreOperation);
+
+            }
+
+            return rtrnRebalanceArr;
+        }
+
+        //todo figure out how to write the update functions for each Dstore in an efficient way.
+
     }
 
 
