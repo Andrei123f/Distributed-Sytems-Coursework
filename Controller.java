@@ -29,7 +29,7 @@ public class Controller {
 
     //expected incoming requests from DStores
     private static final String STORE_ACK_DSTORE = Protocol.STORE_ACK_TOKEN;
-    private static final String REMOVE_ACK_DSTORE = "REMOVE_ACK";
+    private static final String REMOVE_ACK_DSTORE = Protocol.REMOVE_ACK_TOKEN;
     public static final String JOIN_OPERATION = Protocol.JOIN_TOKEN;
 
     //outgoing requests
@@ -97,6 +97,17 @@ public class Controller {
             this.files.add(file);
         }
 
+        public void removeFile(String filename) {
+            int i = 0;
+            for (HashMap<String, String> currFile : this.files) {
+                if(currFile.get("filename").equals(filename)) {
+                    this.files.remove(i);
+                    break;
+                }
+                i++;
+            }
+        }
+
         public boolean hasFile(String fileName) {
             for (HashMap<String, String> currFile : this.files) {
                 if (currFile.get("filename").equals(fileName)) {
@@ -106,6 +117,7 @@ public class Controller {
 
             return false;
         }
+
 
 
     }
@@ -151,8 +163,9 @@ public class Controller {
                     this.prepareStoreACKOperation(segments);
                     break;
                 case Controller.REMOVE_ACK_DSTORE:
-                    this.operation = REMOVE_ACK_DSTORE;
+                    this.operation = Controller.REMOVE_ACK_DSTORE;
                     this.prepareRemoveACKOperation(segments);
+                    break;
                 default:
                     this.invalidOperation = true;
                     break;
@@ -211,7 +224,6 @@ public class Controller {
                 this.invalidArguments = true;
                 return;
             }
-
             this.arguments.put("filename", requestSegments[1]);
         }
     }
@@ -245,6 +257,7 @@ public class Controller {
         private boolean finishedOngoingRequest = false;
         private ONGOING_PROCESS currentOngoingProcess;
         private String request_type;
+        private List<DSTORE_DATA> dstoresAffected = new ArrayList<DSTORE_DATA>();
 
         public REQUEST_THREAD(Socket clientSocket) {
             this.clientSocket = clientSocket;
@@ -270,6 +283,7 @@ public class Controller {
                         String response;
                         operation = formattedRequest.operation;
                         this.request_type = operation;
+                        System.out.println("FORMATTED REQUEST OPERATION : " + formattedRequest.operation);
                         switch (formattedRequest.operation) {
                             case Controller.LIST_OPERATION:
                                 Thread.currentThread().setPriority(7);
@@ -286,10 +300,12 @@ public class Controller {
                                     this.updateOngoingRequest(Controller.STORE_PROCESS);
                                     Thread.sleep(1000);
                                 }
-                                System.out.println("SUCESS FULL STORE for file : " + formattedRequest.arguments.get("filename"));
                                 this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
-                                Controller.removeOngoingProcess(this.currentOngoingProcess);
-
+                                synchronized (Controller.lock) {
+                                    Controller.addFileToDstores(this.dstoresAffected, formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"));
+                                    Controller.updateDstoreStatuses(this.dstoresAffected, Controller.DSTORE_IDLE_STATUS);
+                                    Controller.removeOngoingProcess(this.currentOngoingProcess);
+                                }
                                 break;
                             case Controller.LOAD_OPERATION:
                                 response = this.processLoadOperation(formattedRequest.arguments.get("filename"));
@@ -297,17 +313,19 @@ public class Controller {
                                 break;
                             case Controller.REMOVE_OPERATION:
                                 this.processRemoveOperation(formattedRequest.arguments.get("filename"), outStream);
-                                //todo do the same for remove operation
-                                if (!this.finishedOngoingRequest) {
+                                while (!this.finishedOngoingRequest) {
                                     //check if we have finished.
                                     this.checkIfSuccessRemoveComplete();
                                     //update the ongoing process
                                     this.updateOngoingRequest(Controller.REMOVE_PROCESS);
-                                    System.out.println("is remove completed? " + this.finishedOngoingRequest + " current success count: " + this.currentOngoingProcess.numberOfReceivedSuccessRequests);
                                     Thread.sleep(1000);
                                 }
-                                this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
-
+                                this.sendResponse(Controller.REMOVE_COMPLETE_RESPONSE, outStream);
+                                synchronized (Controller.lock) {
+                                    Controller.removeFileFromDstores(this.dstoresAffected, formattedRequest.arguments.get("filename"));
+                                    Controller.updateDstoreStatuses(this.dstoresAffected, Controller.DSTORE_IDLE_STATUS);
+                                    Controller.removeOngoingProcess(this.currentOngoingProcess);
+                                }
                                 break;
                             case Controller.JOIN_OPERATION:
                                 Thread.currentThread().setPriority(7);
@@ -387,15 +405,14 @@ public class Controller {
                 }
 
                 int i = 1;
-                String currAppend = "";
+                String currAppend;
 
                 for (String filename : usedFiles) {
-                    currAppend = filename + ((i == usedFiles.size()) ? " " : "");
+                    currAppend = filename + ((i == usedFiles.size()) ? "" : " ");
 
                     rtrn_request += currAppend;
                     i++;
                 }
-
                 return rtrn_request;
             }
         }
@@ -415,8 +432,9 @@ public class Controller {
                 //select R dStores && update their status
                 for (int i = 0; i < Controller.dStores.size(); i++) {
                     Controller.dStores.get(i).updateStatus(Controller.DSTORE_STORE_IN_PROGRESS_STATUS);
-                    Controller.dStores.get(i).addFile(filename, filesize);
+                    //Controller.dStores.get(i).addFile(filename, filesize); we will add the file once we receive all ACK responses.
                     selectedDstores.add(Controller.dStores.get(i));
+                    this.dstoresAffected.add(Controller.dStores.get(i));
                 }
                 //get their port and put in the request
                 String currAppend;
@@ -455,6 +473,7 @@ public class Controller {
                 for (int i = 0; i < Controller.dStores.size(); i++) {
                     Controller.dStores.get(i).updateStatus(Controller.DSTORE_REMOVE_IN_PROGRESS_STATUS);
                     dStorePorts.add(Integer.toString(Controller.dStores.get(i).dPort));
+                    this.dstoresAffected.add(Controller.dStores.get(i));
                 }
 
                 String dStorePayload = Controller.REMOVE_OPERATION + " " + filename;
@@ -521,16 +540,17 @@ public class Controller {
 
         //REMOVE ACK OPERATION
         private void processRemoveACKOperation(String filename, int dPort) throws Exception {
-            ONGOING_PROCESS linkedProcess = Controller.getOngoingProcessByFileName(Controller.REMOVE_PROCESS, filename);
-            linkedProcess.numberOfReceivedSuccessRequests.incrementAndGet();
+            synchronized (Controller.lock)
+            {
+                ONGOING_PROCESS linkedProcess = Controller.getOngoingProcessByFileName(Controller.REMOVE_PROCESS, filename);
+                int successResponses = linkedProcess.numberOfReceivedSuccessRequests.incrementAndGet();
+            }
         }
 
         private void updateOngoingRequest(String process_type) throws Exception {
-            //System.out.println("For process type : " + this.request_type + " sent req number :" + this.currentOngoingProcess.numberOfSentRequests + " received req number :" + this.currentOngoingProcess.numberOfReceivedSuccessRequests);
             synchronized (Controller.lock) {
                 this.currentOngoingProcess = Controller.getOngoingProcessByFileName(process_type, this.currentOngoingProcess.fileName);
             }
-            //System.out.println("For process type : " + this.request_type + " sent req number :" + this.currentOngoingProcess.numberOfSentRequests + " received req number :" + this.currentOngoingProcess.numberOfReceivedSuccessRequests);
         }
 
         private void checkIfSuccessStoreComplete() {
@@ -547,6 +567,7 @@ public class Controller {
         }
 
         private void processError(String errorMessage, PrintWriter outStream) {
+            System.out.println("CONTROLLER ERROR : " + errorMessage);
             //errors that we need send
             if (errorMessage.equals(Controller.ERROR_FILE_ALREADY_EXISTS) || errorMessage.equals(Controller.ERROR_FILE_DOES_NOT_EXIST) || errorMessage.equals(Controller.ERROR_NOT_ENOUGH_DSTORES)) {
                 this.sendResponse(errorMessage, outStream);
@@ -631,6 +652,65 @@ public class Controller {
                 break;
             }
             i++;
+        }
+    }
+
+
+    static private void addFileToDstores(List<DSTORE_DATA> dstores, String filename, String filesize) throws Throwable
+    {
+        for (DSTORE_DATA eachDstore : dstores) {
+            eachDstore.addFile(filename, filesize);
+        }
+    }
+
+    static void removeFileFromDstores(List<DSTORE_DATA> dstores, String filename) throws Throwable
+    {
+        for (DSTORE_DATA eachDstore : dstores) {
+            eachDstore.removeFile(filename);
+        }
+    }
+
+    static void updateDstoreStatuses(List<DSTORE_DATA> dstores, String status) throws Throwable
+    {
+        for (DSTORE_DATA eachDstore : dstores) {
+            eachDstore.updateStatus(status);
+        }
+    }
+
+    static void printOngoingProcesses()
+    {
+        for(ONGOING_PROCESS eachProcess : Controller.ongoingProcesses) {
+            System.out.println("===========================================================================");
+            System.out.println("PROCESS TYPE : " + eachProcess.processType);
+            System.out.println("PROCESS FILE : " + eachProcess.fileName);
+            System.out.println("PROCESS SENT REQUESTS : " + eachProcess.numberOfSentRequests);
+            System.out.println("PROCESS RECEIVED REQUESTS : " + eachProcess.numberOfReceivedSuccessRequests.get());
+
+        }
+    }
+
+    static void printDstoreData()
+    {
+        for (DSTORE_DATA eachDstore : Controller.dStores) {
+            System.out.println("===========================================================================");
+            System.out.println("DSTORE PORT : " + eachDstore.dPort);
+            System.out.println("DSTORE STATUS : " + eachDstore.status);
+            System.out.println("DSTORE FILES : ");
+
+            if(eachDstore.files.size() != 0) {
+                int i = 0;
+
+                for (HashMap<String, String> eachFile : eachDstore.files) {
+                    System.out.println("FILE#" + i + " NAME : " + eachFile.get("filename"));
+                    System.out.println("FILE#" + i + " SIZE : " + eachFile.get("filesize"));
+                    i++;
+                }
+
+            }else {
+                System.out.println("NO FILES");
+            }
+
+
         }
     }
 

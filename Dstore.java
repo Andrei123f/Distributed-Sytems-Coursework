@@ -191,7 +191,7 @@ class Dstore{
                     INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
 
                     if(formattedRequest.invalidOperation || formattedRequest.invalidArguments)
-                        throw new Exception("Invalid Request from Client" + request);
+                        throw new Exception("Invalid Request from Client/Controller" + request);
 
                     switch (formattedRequest.operation) {
                         case (Protocol.STORE_TOKEN):
@@ -199,6 +199,9 @@ class Dstore{
                             break;
                         case (Protocol.LOAD_DATA_TOKEN):
                             this.processLoadOperation(formattedRequest.arguments.get("filename"));
+                            break;
+                        case(Protocol.REMOVE_TOKEN):
+                            this.processRemoveOperation(formattedRequest.arguments.get("filename"));
                             break;
                     }
                 }
@@ -238,7 +241,7 @@ class Dstore{
                     this.outTextStream_controller.println(Protocol.STORE_ACK_TOKEN + " " + filename);
                     this.outTextStream_controller.flush();
                     System.out.println("Sending ACK response to Controller - success");
-                    file_details.put(filename, fileSize);
+                    file_details.put(filename, Integer.valueOf(fileSize));
 
                 } else {
                     System.out.println("File already exists.");
@@ -277,6 +280,25 @@ class Dstore{
             } catch (Throwable e) {
                 throw new Error("Error when loading file : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             }
+        }
+
+        public void processRemoveOperation(String filename) throws Throwable
+        {
+            System.out.println("Deleting file " + filename + " ...");
+            File file = new File(Dstore.file_folder + File.separator + filename);
+            String responseTo_controller;
+            if(file.delete()) {
+                System.out.println("Deleting file " + filename + " - finished");
+                Dstore.file_details.remove(filename);
+                responseTo_controller = Protocol.REMOVE_ACK_TOKEN + " " + filename;
+
+            } else {
+                responseTo_controller = Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + filename;
+            }
+            System.out.println("Sending response to Controller... : " + responseTo_controller );
+            this.outTextStream_controller.println(responseTo_controller);
+            this.outTextStream_controller.flush();
+            System.out.println("Sending response to Controller... : " + responseTo_controller + " - finished");
         }
 
 
