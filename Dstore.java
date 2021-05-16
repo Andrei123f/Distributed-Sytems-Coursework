@@ -125,7 +125,8 @@ class Dstore{
 
 
             }catch (Throwable e) {
-                System.out.println("Error when receiving request from Controller: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                String error  = ("Error when receiving request from Controller: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                DstoreLogger.getInstance().log(error);
             }
         }
 
@@ -207,7 +208,8 @@ class Dstore{
                 }
 
             } catch (Throwable e){
-                System.out.println("Error when receiving request from Client: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                String error = ("Error when receiving request from Client/Controller: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                DstoreLogger.getInstance().log(error);
             }
 
         }
@@ -326,6 +328,7 @@ class Dstore{
             timeout = Integer.parseInt(args[2]);
             file_folder = args[3];
             File dstoreFolder = new File(file_folder);
+            DstoreLogger.init(Logger.LoggingType.ON_FILE_AND_TERMINAL, port);
             if (!dstoreFolder.exists())
                 if (!dstoreFolder.mkdir()) throw new RuntimeException("Cannot create dstore folder (folder absolute path: " + dstoreFolder.getAbsolutePath() + ")");
             try {
@@ -335,7 +338,9 @@ class Dstore{
                     Thread controllerThread = new Thread(new CONTROLLER_THREAD(socket_to_controller));
                     controllerThread.start();
                 } catch (Throwable e) {
-                    System.out.println("Unexpected System error when listening for Controller requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                    String error = ("Unexpected System error when listening for Controller requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                    //DstoreLogger.getInstance().log(error);
+
                 }
 
                 try {
@@ -352,16 +357,22 @@ class Dstore{
                             System.out.println("Dstore is not connected to the Controller server.");
 
                         }catch (Throwable e){
-                            System.out.println("error"+e);
+                            String error = ("error"+e);
+                            //DstoreLogger.getInstance().log(error);
                         }
                     }
                 } catch (Throwable e){
-                    System.out.println("Unexpected System error when listening for Client requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                    String error = ("Unexpected System error when listening for Client requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                    //DstoreLogger.getInstance().log(error);
                 }
 
             } catch (Throwable e){
-                System.out.println("Unexpected System error when listening for overall requests : " + (e.getMessage() != null ? e.getMessage() : e.toString())); }
+                String error = ("Unexpected System error when listening for overall requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                //DstoreLogger.getInstance().log(error);
+            }
         }catch(Throwable e){
-            System.out.println("Unexpected System error when initialising the server : " + (e.getMessage() != null ? e.getMessage() : e.toString())); }
+            String error = ("Unexpected System error when initialising the server : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            //DstoreLogger.getInstance().log(error);
+        }
     }
 }

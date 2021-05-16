@@ -256,7 +256,8 @@ public class Controller {
         private PrintWriter outStream;
         private boolean finishedOngoingRequest = false;
         private ONGOING_PROCESS currentOngoingProcess;
-        private String request_type;
+        private String request_type;//for handling when a dstore connection drops.
+        private String dPort; //for handling when a dstore connection drops
         private List<DSTORE_DATA> dstoresAffected = new ArrayList<DSTORE_DATA>();
 
         public REQUEST_THREAD(Socket clientSocket) {
@@ -283,7 +284,6 @@ public class Controller {
                         String response;
                         operation = formattedRequest.operation;
                         this.request_type = operation;
-                        System.out.println("FORMATTED REQUEST OPERATION : " + formattedRequest.operation);
                         switch (formattedRequest.operation) {
                             case Controller.LIST_OPERATION:
                                 Thread.currentThread().setPriority(7);
@@ -298,7 +298,7 @@ public class Controller {
                                     this.checkIfSuccessStoreComplete();
                                     //update the ongoing process
                                     this.updateOngoingRequest(Controller.STORE_PROCESS);
-                                    Thread.sleep(1000);
+                                    Thread.sleep(200);
                                 }
                                 this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
                                 synchronized (Controller.lock) {
@@ -318,7 +318,7 @@ public class Controller {
                                     this.checkIfSuccessRemoveComplete();
                                     //update the ongoing process
                                     this.updateOngoingRequest(Controller.REMOVE_PROCESS);
-                                    Thread.sleep(1000);
+                                    Thread.sleep(200);
                                 }
                                 this.sendResponse(Controller.REMOVE_COMPLETE_RESPONSE, outStream);
                                 synchronized (Controller.lock) {
@@ -346,7 +346,32 @@ public class Controller {
 
                     request = this.inStream.readLine();
                 }
-                System.out.println("Request for operation " + operation + " terminated Successfully. Closing thread...");
+                System.out.println("Session closed for operation : " + this.request_type);
+
+                //for the cases when the session is either terminated/timed out/finished by the client/dstore
+                switch (this.request_type) {
+                    case Controller.JOIN_OPERATION:
+                        System.out.println("A connection with a Dstore(port : " + this.dPort  + ") just dropped. Updating index ... ");
+                        this.processDstoreDrop();
+                        System.out.println("Index updated.");
+                        break;
+                    case Controller.STORE_OPERATION:
+                        if(!this.finishedOngoingRequest) {
+                            System.out.println("Store operation has timed out/has been closed without finishing. Updating index.");
+                            this.processStoreDrop();
+                            System.out.println("Index updated.");
+                        }
+                        break;
+                    case Controller.REMOVE_OPERATION:
+                        if(!this.finishedOngoingRequest) {
+                            System.out.println("Remove operation has timed out/has been closed without finishing. Updating index.");
+                            System.out.println("Index updated.");
+                        }
+                        break;
+                }
+
+
+
 
             } catch (Throwable e) {
                 this.processError((e.getMessage() != null ? e.getMessage() : e.toString()), outStream);
@@ -361,24 +386,9 @@ public class Controller {
                 DSTORE_DATA dStore = new DSTORE_DATA(Integer.parseInt(port));
                 Controller.dStores.add(dStore);
                 Controller.currRFator++;
-                System.out.println("DStore added. Current rFactor: " + Controller.currRFator);
-                //System.out.println("Dstores : ");
-                int i = 1;
-                for (DSTORE_DATA eachDstore : Controller.dStores) {
-                    //System.out.println("Dstore#" + i + " port : " + eachDstore.dPort);
-                    //System.out.println("Dstore#" + i + " status : " + eachDstore.status);
-                    //System.out.println("Dstore#" + i + " files: ");
-
-                    if (eachDstore.files.size() != 0) {
-                        for (HashMap<String, String> eachFile : eachDstore.files) {
-                            //System.out.println("Filename : " + eachFile.get("filename"));
-                            //System.out.println("Filename : " + eachFile.get("filesize"));
-                        }
-                    }
-                    //System.out.println("No files for this bad boy");
-
-                    i++;
-                }
+                System.out.println("DStore added.");
+                this.dPort = port;
+                //Controller.printDstoreData();
             }
 
         }
@@ -566,13 +576,40 @@ public class Controller {
             outStream.flush();
         }
 
+        private void processDstoreDrop()
+        {
+            synchronized (Controller.lock)
+            {
+                int  i = 0;
+                for (DSTORE_DATA eachDstore : Controller.dStores) {
+                    if(eachDstore.dPort == Integer.parseInt(this.dPort)){
+                        Controller.dStores.remove(i);
+                        break;
+                    }
+                    i++;
+                }
+                Controller.currRFator--;
+            }
+        }
+
+        private void processStoreDrop() throws Throwable
+        {
+            synchronized (Controller.lock)
+            {
+                String filename = this.currentOngoingProcess.fileName;
+                Controller.removeOngoingProcess(this.currentOngoingProcess);
+                Controller.updateDstoreStatuses(this.dstoresAffected, Controller.DSTORE_IDLE_STATUS);
+                Controller.removeFileFromDstores(this.dstoresAffected, filename);
+            }
+        }
+
         private void processError(String errorMessage, PrintWriter outStream) {
-            System.out.println("CONTROLLER ERROR : " + errorMessage);
             //errors that we need send
             if (errorMessage.equals(Controller.ERROR_FILE_ALREADY_EXISTS) || errorMessage.equals(Controller.ERROR_FILE_DOES_NOT_EXIST) || errorMessage.equals(Controller.ERROR_NOT_ENOUGH_DSTORES)) {
                 this.sendResponse(errorMessage, outStream);
+                return;
             }
-            //todo implement logging of the other ones.
+            ControllerLogger.getInstance().log(errorMessage);
 
         }
     }
@@ -601,6 +638,7 @@ public class Controller {
         String timeoutPer = args[2];
         String timeoutForNewReb = args[3];
         System.out.println("Starting server...");
+        ControllerLogger.init(Logger.LoggingType.ON_FILE_AND_TERMINAL);
         Controller sysStart = new Controller(Integer.parseInt(cPort), Integer.parseInt(rFactor), Integer.parseInt(timeoutPer), Integer.parseInt(timeoutForNewReb));
     }
 
@@ -633,9 +671,7 @@ public class Controller {
     }
 
     static protected ONGOING_PROCESS getOngoingProcessByFileName(String process_type, String filename) throws Exception {
-        //System.out.println("Searching by file name ...");
         for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
-            //System.out.println("Current file name : " + currOngoingProcess.fileName);
             if (currOngoingProcess.processType.equals(process_type) && currOngoingProcess.fileName.equals(filename)) {
                 return currOngoingProcess;
             }
@@ -691,6 +727,7 @@ public class Controller {
 
     static void printDstoreData()
     {
+        System.out.println("Current R factor : " + Controller.currRFator);
         for (DSTORE_DATA eachDstore : Controller.dStores) {
             System.out.println("===========================================================================");
             System.out.println("DSTORE PORT : " + eachDstore.dPort);
