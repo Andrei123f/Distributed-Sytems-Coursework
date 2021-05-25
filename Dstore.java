@@ -26,6 +26,7 @@ class Dstore{
         }
 
         private void initRequestStructure(String request) {
+            DstoreLogger.getInstance().log("Incoming request from client : " + request);
             //split the request by spaces
             String segments[] = request.split(" ");
             //get the request type
@@ -111,6 +112,7 @@ class Dstore{
                 while((line = this.inTextStream_controller.readLine()) != null)
                 {
                     System.out.println("Incoming request from Controller: " + line);
+                    DstoreLogger.getInstance().log("Incoming request from Controller: " + line);
                     INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(line);
 
                     if(formattedRequest.invalidOperation || formattedRequest.invalidArguments)
@@ -320,6 +322,7 @@ class Dstore{
     {
         Dstore sys = new Dstore();
         sys.main2(args);
+
     }
 
 
@@ -335,6 +338,7 @@ class Dstore{
             file_folder = args[3];
             File dstoreFolder = new File(file_folder);
             DstoreLogger.init(Logger.LoggingType.ON_FILE_AND_TERMINAL, port);
+            DstoreLogger.getInstance().log("Starting Dstore server ... on port" + port);
             if (!dstoreFolder.exists())
                 if (!dstoreFolder.mkdir()) throw new RuntimeException("Cannot create dstore folder (folder absolute path: " + dstoreFolder.getAbsolutePath() + ")");
             try {
@@ -345,7 +349,7 @@ class Dstore{
                     controllerThread.start();
                 } catch (Throwable e) {
                     String error = ("Unexpected System error when listening for Controller requests : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
-                    //DstoreLogger.getInstance().log(error);
+                    DstoreLogger.getInstance().log(error);
 
                 }
 

@@ -281,6 +281,7 @@ public class Controller {
                 while (request  != null) {
                     try {
                         System.out.println("Incoming request : " + request);
+                        ControllerLogger.getInstance().log("Incoming request : " + request);
                         INCOMING_REQUEST formattedRequest = new INCOMING_REQUEST(request);
 
                         if (formattedRequest.invalidOperation || formattedRequest.invalidArguments) {
@@ -353,7 +354,7 @@ public class Controller {
 
                     request = this.inStream.readLine();
                 }
-                System.out.println("Session closed for operation : " + this.request_type);
+                System.out.println("Session closed for operation : " + this.request_type + " curr N : " + Controller.currRFator);
 
                 //for the cases when the session is either terminated/timed out/finished by the client/dstore
                 switch (this.request_type) {
@@ -365,16 +366,15 @@ public class Controller {
                     case Controller.STORE_OPERATION:
                         if(!this.finishedOngoingRequest) {
                             System.out.println("Store operation has timed out/has been closed without finishing. Updating index.");
-                            this.processStoreDrop();
-                            System.out.println("Index updated.");
                         }
-                        break;
                     case Controller.REMOVE_OPERATION:
                         if(!this.finishedOngoingRequest) {
                             System.out.println("Remove operation has timed out/has been closed without finishing. Updating index.");
-                            System.out.println("Index updated.");
                         }
-                        break;
+                    default:
+                        synchronized (Controller.lock) {
+                            Controller.checkIfDstoreConnectionExists();
+                        }
                 }
 
 
@@ -519,7 +519,6 @@ public class Controller {
         private String processLoadOperation(String filename) throws Exception {
             synchronized (Controller.lock)
             {
-                System.out.println("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX SEARCHING FOR FILE : " + filename);
                 Controller.printDstoreData();
                 Controller.checkIfEnoughDstores(false);
                 String rtrn_request = Controller.LOAD_FROM_RESPONSE;
@@ -678,15 +677,14 @@ public class Controller {
         }
 
         private void setFilesToDistribute()
-        {//TODO HERE YOU WOULD ACTUALLY HAVE TO CALL EACH DSTORE TO GET ITS FILES.
+        {
             synchronized (Controller.lock)
             {
                 List<HashMap<String, String>> returnFilesArr = new ArrayList<HashMap<String, String>>();
                 List<String> filesUsed = new ArrayList<String>();
-
                 for (DSTORE_DATA eachDstore : Controller.dStores){
                  for (HashMap<String, String> eachFile : eachDstore.files) {
-                     if(filesUsed.contains(eachFile.get("filename"))){
+                     if(! filesUsed.contains(eachFile.get("filename"))){
                          filesUsed.add(eachFile.get("filename"));
                          returnFilesArr.add(eachFile);
                      }
@@ -936,6 +934,34 @@ public class Controller {
         }
 
     }
+
+    private static void checkIfDstoreConnectionExists()
+    {
+        int i = 0;
+        List<Controller.DSTORE_DATA> finalList = new ArrayList<>();
+        for (DSTORE_DATA eachDstore : Controller.dStores) {
+            int currPort = eachDstore.dPort;
+            boolean connAlive = true;
+            try {
+                Socket ignored = new Socket("localhost", currPort);
+            } catch (Throwable e) {
+                connAlive = false;
+            } finally {
+                if(! connAlive) {
+                    System.out.println("Connection to Dstore with port : "  + currPort + "  dropped.");
+                    System.out.println("Updating index ...");
+                    Controller.currRFator--;
+                    System.out.println("Index updated. curr R factor : " + Controller.currRFator);
+                } else {
+                    finalList.add(eachDstore);
+                }
+            }
+        i++;
+        }
+        Controller.dStores = finalList;
+        Controller.printDstoreData();
+    }
+
 
     private static boolean checkIfFileExists(String filename) {
         for (DSTORE_DATA eachDstore : Controller.dStores) {
