@@ -466,11 +466,16 @@ public class Controller {
                 List<DSTORE_DATA> selectedDstores = new ArrayList<DSTORE_DATA>();
 
                 //select R dStores && update their status
+                int currI = 1;
                 for (int i = 0; i < Controller.dStores.size(); i++) {
                     Controller.dStores.get(i).updateStatus(Controller.DSTORE_STORE_IN_PROGRESS_STATUS);
                     //Controller.dStores.get(i).addFile(filename, filesize); we will add the file once we receive all ACK responses.
                     selectedDstores.add(Controller.dStores.get(i));
                     this.dstoresAffected.add(Controller.dStores.get(i));
+                    //only to R Dstores.
+                    if (currI == Controller.rFactor)
+                        break;
+                    currI++;
                 }
                 //get their port and put in the request
                 String currAppend;
