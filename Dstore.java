@@ -1,8 +1,13 @@
-import javax.rmi.ssl.SslRMIClientSocketFactory;
 import java.io.*;
 import java.net.*;
 import java.util.*;
 
+/**
+ * Dstore class - this will be the node of the Distributed Storage.
+ * A singleton design pattern will be used for this class, where each property will be accessible && dynamically changed by the request threads.
+ *
+ * @author Andrei23f(ap4u19@soton.ac.uk)
+ */
 class Dstore{
     static int port = 0;
     static int cport = 0;
@@ -14,7 +19,10 @@ class Dstore{
     static Socket socket_to_controller;
 
     private static Object lock = new Object();//for dealing with Thread race conditions
-
+    /**
+     * The class that will validate && format each request that comes from Client / Controller.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class INCOMING_REQUEST {
         public String operation;
         public Map<String, String> arguments = new HashMap<String, String>();
@@ -81,6 +89,11 @@ class Dstore{
 
     }
 
+    /**
+     * The class that will be only used for Controller requests.
+     *
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     public class CONTROLLER_THREAD implements Runnable
     {
         private Socket socketTo_controller;
@@ -150,6 +163,11 @@ class Dstore{
 
     }
 
+    /**
+     * The class that will be only used for Controller/Client requests.
+     *
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class CLIENT_THREAD implements Runnable
     {
         private Socket socketTo_client;
@@ -241,11 +259,11 @@ class Dstore{
                     outFile.close();
                     System.out.println("Writing the file - success");
 
-                    System.out.println("Sending ACK response to Controller ...");
+                    System.out.println("Sending Store ACK response to Controller for file " + filename + " ...");
                     //send ack response to controller.
                     this.outTextStream_controller.println(Protocol.STORE_ACK_TOKEN + " " + filename);
                     this.outTextStream_controller.flush();
-                    System.out.println("Sending ACK response to Controller - success");
+                    System.out.println("Sending Store ACK response to Controller for file " + filename + " ... - success");
                     file_details.put(filename, Integer.valueOf(fileSize));
 
                 } else {
@@ -305,7 +323,7 @@ class Dstore{
                 //todo should you close the socket client here?
                 responseTo_controller = Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + filename;
             }
-            System.out.println("Sending response to Controller... : " + responseTo_controller );
+            System.out.println("Sending response to Controller... : " + responseTo_controller);
             this.outTextStream_controller.println(responseTo_controller);
             this.outTextStream_controller.flush();
             System.out.println("Sending response to Controller... : " + responseTo_controller + " - finished");
@@ -314,18 +332,17 @@ class Dstore{
 
     }
 
-
-
-
-
+    /**
+     * The entrypoint of the program when the Dstore node starts
+     *
+     * @throws Exception | void
+     */
     public static void main (String[] args ) throws Throwable
     {
         Dstore sys = new Dstore();
         sys.main2(args);
 
     }
-
-
 
     public void main2(String[] args) throws IOException {
         try{

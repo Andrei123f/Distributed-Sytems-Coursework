@@ -1,9 +1,4 @@
-import jdk.jshell.spi.ExecutionControl;
-
-import javax.naming.ldap.Control;
-import java.awt.image.renderable.ContextualRenderedImageFactory;
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
@@ -11,9 +6,11 @@ import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/*
-Controller class
-@author Andrei Popa(ap4u19@soton.ac.uk)
+/**
+ * Controller class - this will be the entrypoint of the Distributed Storage.
+ * A singleton design pattern will be used for this class, where each property will be accessible && dynamically changed by the request threads.
+ *
+ * @author Andrei23f(ap4u19@soton.ac.uk)
  */
 public class Controller {
     /* Define constants start */
@@ -73,7 +70,10 @@ public class Controller {
 
     //
 
-
+    /**
+     * The class that represents each Database. This will be dynamically updated based on Client's request && Dstore's responses.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class DSTORE_DATA {
         public int dPort;
         public String status = Controller.DSTORE_IDLE_STATUS;
@@ -129,6 +129,10 @@ public class Controller {
 
     }
 
+    /**
+     * The class that will validate && format each request that comes from Client / Dstores.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class INCOMING_REQUEST {
         public String operation;
         public Map<String, String> arguments = new HashMap<String, String>();
@@ -235,6 +239,11 @@ public class Controller {
         }
     }
 
+    /**
+     * The class that will be used for keeping track of ongoing Thread requests from the Client(Store and Remove).
+     * This will be updated/deleted once we get every ACK response from the Dstores.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class ONGOING_PROCESS {
         String processType;
         PrintWriter clientOutputStream;
@@ -256,7 +265,10 @@ public class Controller {
 
     }
 
-    //each Request will have its own thread and common used variables from the Controller object.
+    /**
+     * The class that will be used for each request because each Request will have its own thread and common used variables from the Controller object.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     class REQUEST_THREAD implements Runnable {
         private Socket clientSocket;
         private BufferedReader inStream;
@@ -271,6 +283,10 @@ public class Controller {
             this.clientSocket = clientSocket;
         }
 
+        /**
+         * Entry point for each request thread. We need to : 1) get the request, 2) validate && format it, 3) process it
+         * @author Andrei123f(ap4u19@soton.ac.uk)
+         */
         public void run() {
             try {
                 this.inStream = new BufferedReader(new InputStreamReader(this.clientSocket.getInputStream()));
@@ -306,13 +322,14 @@ public class Controller {
                                     this.checkIfSuccessStoreComplete();
                                     //update the ongoing process
                                     this.updateOngoingRequest(Controller.STORE_PROCESS);
-                                    Thread.sleep(200);
+                                    Thread.sleep(10);
                                 }
                                 this.sendResponse(Controller.STORE_COMPLETE_RESPONSE, outStream);
                                 synchronized (Controller.lock) {
                                     Controller.addFileToDstores(this.dstoresAffected, formattedRequest.arguments.get("filename"), formattedRequest.arguments.get("filesize"));
                                     Controller.updateDstoreStatuses(this.dstoresAffected, Controller.DSTORE_IDLE_STATUS);
                                     Controller.removeOngoingProcess(this.currentOngoingProcess);
+                                    this.dstoresAffected = new ArrayList<DSTORE_DATA>();
                                 }
                                 break;
                             case Controller.LOAD_OPERATION:
@@ -326,13 +343,14 @@ public class Controller {
                                     this.checkIfSuccessRemoveComplete();
                                     //update the ongoing process
                                     this.updateOngoingRequest(Controller.REMOVE_PROCESS);
-                                    Thread.sleep(200);
+                                    Thread.sleep(10);
                                 }
                                 this.sendResponse(Controller.REMOVE_COMPLETE_RESPONSE, outStream);
                                 synchronized (Controller.lock) {
                                     Controller.removeFileFromDstores(this.dstoresAffected, formattedRequest.arguments.get("filename"));
                                     Controller.updateDstoreStatuses(this.dstoresAffected, Controller.DSTORE_IDLE_STATUS);
                                     Controller.removeOngoingProcess(this.currentOngoingProcess);
+                                    this.dstoresAffected = new ArrayList<DSTORE_DATA>();
                                 }
                                 break;
                             case Controller.JOIN_OPERATION:
@@ -405,6 +423,7 @@ public class Controller {
             synchronized (Controller.lock)
             {
                 Controller.checkIfEnoughDstores(false);
+                Controller.printDstoreData();
                 String rtrn_request = Controller.LIST_RESPONSE + " ";
                 ArrayList<String> usedFiles = new ArrayList<String>();
                 List<HashMap<String, String>> currFileList;
@@ -519,7 +538,6 @@ public class Controller {
         private String processLoadOperation(String filename) throws Exception {
             synchronized (Controller.lock)
             {
-                Controller.printDstoreData();
                 Controller.checkIfEnoughDstores(false);
                 String rtrn_request = Controller.LOAD_FROM_RESPONSE;
                 //get the first dStore that has the file
@@ -618,11 +636,11 @@ public class Controller {
 
         private void processError(String errorMessage, PrintWriter outStream) {
             //errors that we need send
+            ControllerLogger.getInstance().log(errorMessage);
             if (errorMessage.equals(Controller.ERROR_FILE_ALREADY_EXISTS) || errorMessage.equals(Controller.ERROR_FILE_DOES_NOT_EXIST) || errorMessage.equals(Controller.ERROR_NOT_ENOUGH_DSTORES)) {
                 this.sendResponse(errorMessage, outStream);
                 return;
             }
-            ControllerLogger.getInstance().log(errorMessage);
 
         }
     }
@@ -795,6 +813,11 @@ public class Controller {
         this.initialiseSystem();
     }
 
+    /**
+     * Main function, Used for starting the Controller server
+     * @param args
+     * @throws Exception
+     */
     public static void main(String[] args) throws Exception {
         String cPort = args[0];
         String rFactor = args[1];
@@ -820,6 +843,10 @@ public class Controller {
         this.waitForRequests();
     }
 
+    /**
+     * Entrypoint for each request that comes in the Controller Server
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     private void waitForRequests() throws Exception {
         for (; ; ) {
             try {
@@ -828,11 +855,20 @@ public class Controller {
                 Thread request = new Thread(new REQUEST_THREAD(client));
                 request.start();
             } catch (Throwable e) {
-                System.out.println("UNEXPECTED CONTROLLER ERROR : " + (e.getMessage() != null ? e.getMessage() : e.toString()) + " IOASDJASDONMDSAKNDSANDASKLNDSALKNSDALKXCXXXXXXXXX");
+                System.out.println("UNEXPECTED CONTROLLER ERROR : " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             }
         }
     }
 
+    /**
+     * Get ongoing process by the given file name.
+     *
+     * @param process_type String
+     * @param filename String
+     * @return void | ONGOING_PROCESS
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     * @throws Exception | void
+     */
     static protected ONGOING_PROCESS getOngoingProcessByFileName(String process_type, String filename) throws Exception {
         for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
             if (currOngoingProcess.processType.equals(process_type) && currOngoingProcess.fileName.equals(filename)) {
@@ -843,6 +879,12 @@ public class Controller {
 
     }
 
+    /**
+     * Remove Ongoing Process from the Controller list.
+     *
+     * @param processToRemove ONGOING_PROCESS
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     static private void removeOngoingProcess(ONGOING_PROCESS processToRemove) {
         int i = 0;
         for (ONGOING_PROCESS currOngoingProcess : Controller.ongoingProcesses) {
@@ -854,14 +896,31 @@ public class Controller {
         }
     }
 
-
+    /**
+     * Add the file to the given Dstore list. Will be used in the STORE Operation to keep track of the files.
+     *
+     * @param dstores List<DSTORE_DATA>
+     * @param filename String
+     * @param filesize String
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     * @throws Throwable | void
+     */
     static private void addFileToDstores(List<DSTORE_DATA> dstores, String filename, String filesize) throws Throwable
     {
         for (DSTORE_DATA eachDstore : dstores) {
-            eachDstore.addFile(filename, filesize);
+            if(! eachDstore.hasFile(filename))
+                eachDstore.addFile(filename, filesize);
         }
     }
 
+    /**
+     * Remove the file from the given Dstore list
+     *
+     * @param dstores List<DSTORE_DATA>
+     * @param filename String
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     * @throws Throwable | void
+     */
     static void removeFileFromDstores(List<DSTORE_DATA> dstores, String filename) throws Throwable
     {
         for (DSTORE_DATA eachDstore : dstores) {
@@ -869,6 +928,14 @@ public class Controller {
         }
     }
 
+    /**
+     * Update the status of the given Dstore List
+     *
+     * @param dstores List<DSTORE_DATA>
+     * @param status String
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     * @throws Throwable | void
+     */
     static void updateDstoreStatuses(List<DSTORE_DATA> dstores, String status) throws Throwable
     {
         for (DSTORE_DATA eachDstore : dstores) {
@@ -876,6 +943,10 @@ public class Controller {
         }
     }
 
+    /**
+     * Helper function for printing out the current Ongoing processes.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     static void printOngoingProcesses()
     {
         for(ONGOING_PROCESS eachProcess : Controller.ongoingProcesses) {
@@ -887,10 +958,14 @@ public class Controller {
 
         }
     }
-
+    /**
+     * Helper function for printing out the current data from the Distributed Storage System.
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     static void printDstoreData()
     {
-        System.out.println("Current R factor : " + Controller.currRFator);
+        System.out.println("R Factor : " + Controller.rFactor);
+        System.out.println("Current N factor : " + Controller.currRFator);
         for (DSTORE_DATA eachDstore : Controller.dStores) {
             System.out.println("===========================================================================");
             System.out.println("DSTORE PORT : " + eachDstore.dPort);
@@ -914,9 +989,16 @@ public class Controller {
         }
     }
 
-
+    /**
+     * Function to check if we have enough Dstores.
+     * idleStatus is a flag to check if we have enough Dstores && have them in the idle status.
+     *
+     * @param idleStatus boolean
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     * @throws Exception | void
+     */
     private static void checkIfEnoughDstores(boolean idleStatus) throws Exception {
-        int dStores = idleStatus ? Controller.currRFator : 0;
+        int dStores = idleStatus ? 0 : Controller.currRFator;
 
         //for store operation we need at least R dStores in the "idle status"
         if (idleStatus) {
@@ -935,6 +1017,11 @@ public class Controller {
 
     }
 
+    /**
+     * Function to check if the Dstore Connection still exists && update the index after we receive a success response from the current operation.
+     *
+     * @author Andrei123f(ap4u19@soton.ac.uk)
+     */
     private static void checkIfDstoreConnectionExists()
     {
         int i = 0;
@@ -951,7 +1038,8 @@ public class Controller {
                     System.out.println("Connection to Dstore with port : "  + currPort + "  dropped.");
                     System.out.println("Updating index ...");
                     Controller.currRFator--;
-                    System.out.println("Index updated. curr R factor : " + Controller.currRFator);
+                    System.out.println("Index updated. curr N factor : " + Controller.currRFator);
+                    System.out.println("R factor : " + Controller.rFactor);
                 } else {
                     finalList.add(eachDstore);
                 }
@@ -959,10 +1047,14 @@ public class Controller {
         i++;
         }
         Controller.dStores = finalList;
-        Controller.printDstoreData();
     }
 
-
+    /**
+     * Function to check if at least 1 Dstore has the file.
+     *
+     * @param filename String
+     * @return boolean
+     */
     private static boolean checkIfFileExists(String filename) {
         for (DSTORE_DATA eachDstore : Controller.dStores) {
             if (eachDstore.hasFile(filename)) {
