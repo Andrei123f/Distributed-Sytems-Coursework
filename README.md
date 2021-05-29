@@ -10,6 +10,10 @@ Client requests may include :
  - LOAD, when client wants to get a stored file from the sysyem. In this case the Controller will select the first Dstore that has that file and share the file with the Client.
  - REMOVE, when the client wants to delete a stored file from the system. In this case the Controller will send remove requests to all Dstores to delete that file.
  - LIST, when the client wants to know the list of files present in the system. In this case the Controller will send a list of all present files from the system.
+ 
+ To start each server's component you need to run the following commands on the terminal : 
+ - Controller: java Controller cport R timeout rebalance_period
+ - A Dstore: java Dstore port cport timeout file_folder
 
 Each request has its own thread, meaning that the system can support multiple client requests(possibly with the same operation) at once.
 For development purposes, I have kept the server to "localhost" in both Controller and Dstore.
